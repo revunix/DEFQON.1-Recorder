@@ -160,6 +160,8 @@ Mount a volume to persist your recordings.
 
 | Key          | Action                                              |
 |--------------|-----------------------------------------------------|
+| `l`          | Listen to the selected live stream inside the TUI   |
+| `s`          | Stop TUI audio playback                             |
 | `q`          | Quit (graceful shutdown of all recordings)          |
 | `Ctrl+C`     | Quit (graceful shutdown of all recordings)          |
 | `SIGTERM`    | Graceful shutdown (e.g. `docker stop`)              |
@@ -185,6 +187,7 @@ The application works with sensible defaults — no configuration required.
 | `RECORDINGS_DIR`       | Directory to save recordings                 | `./recordings`      |
 | `TIMETABLE_PATH`       | Path to the timetable JSON                   | `dq-timetable.json` |
 | `TOOLS_DIR`            | Directory with bundled yt-dlp / ffmpeg       | exe directory       |
+| `TEST_MIXLR_CHANNEL`   | Optional extra Mixlr channel slug for testing | unset               |
 | `CHECK_INTERVAL_MS`    | Stream check interval (ms)                   | `60000`             |
 | `TUI_UPDATE_INTERVAL_MS` | UI refresh rate (ms)                        | `2000`              |
 

@@ -71,5 +71,6 @@ func main() {
 	}
 
 	cancel()
+	ui.Close()
 	rec.StopAll(10 * time.Second)
 }

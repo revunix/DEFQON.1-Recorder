@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/revunix/defqon1-recorder/internal/logging"
@@ -44,33 +45,44 @@ func (c *Controller) CheckOnce(ctx context.Context) {
 	c.log.Info(fmt.Sprintf("--- Checking channels at %s ---",
 		time.Now().In(util.Berlin()).Format("15:04:05")))
 
+	var wg sync.WaitGroup
 	for _, channel := range c.channels {
-		ch, err := c.client.Fetch(ctx, channel)
-		if err != nil {
-			c.log.Error(fmt.Sprintf("[%s] Fetch Error: %s", channel, err))
-			// Keep the last known status on transient errors.
-			continue
-		}
+		channel := channel
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c.checkChannel(ctx, channel)
+		}()
+	}
+	wg.Wait()
+}
 
-		stage := ch.Username
-		if stage == "" {
-			stage = channel
-		}
-		c.status.Set(channel, stage, ch.Live, ch.ListenerCount)
+func (c *Controller) checkChannel(ctx context.Context, channel string) {
+	ch, err := c.client.Fetch(ctx, channel)
+	if err != nil {
+		c.log.Error(fmt.Sprintf("[%s] Fetch Error: %s", channel, err))
+		// Keep the last known status on transient errors.
+		return
+	}
 
-		if ch.Live && ch.StreamURL != "" {
-			if c.recorder.IsRecording(stage) {
-				c.recorder.UpdateListeners(stage, ch.ListenerCount)
-			} else {
-				c.recorder.Start(stage, ch.StreamURL, ch.ListenerCount)
-			}
-			continue
-		}
+	stage := ch.Username
+	if stage == "" {
+		stage = channel
+	}
+	c.status.Set(channel, stage, ch.Live, ch.ListenerCount, ch.StreamURL)
 
+	if ch.Live && ch.StreamURL != "" {
 		if c.recorder.IsRecording(stage) {
-			c.log.Info(fmt.Sprintf("[%s] Offline. Stopping recording.", stage))
-			c.recorder.Stop(stage)
+			c.recorder.UpdateListeners(stage, ch.ListenerCount)
+		} else {
+			c.recorder.Start(stage, ch.StreamURL, ch.ListenerCount)
 		}
+		return
+	}
+
+	if c.recorder.IsRecording(stage) {
+		c.log.Info(fmt.Sprintf("[%s] Offline. Stopping recording.", stage))
+		c.recorder.Stop(stage)
 	}
 }
 

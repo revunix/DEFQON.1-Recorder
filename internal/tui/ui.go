@@ -11,6 +11,7 @@ import (
 	"github.com/rivo/tview"
 
 	"github.com/revunix/defqon1-recorder/internal/config"
+	"github.com/revunix/defqon1-recorder/internal/listener"
 	"github.com/revunix/defqon1-recorder/internal/logging"
 	"github.com/revunix/defqon1-recorder/internal/recorder"
 	"github.com/revunix/defqon1-recorder/internal/status"
@@ -59,6 +60,7 @@ type UI struct {
 	logView   *tview.TextView
 	statusBar *tview.TextView
 	recorder  *recorder.Manager
+	listener  *listener.Player
 	timetable *timetable.Timetable
 	streams   *status.Registry
 	cfg       config.Config
@@ -76,6 +78,7 @@ func New(
 		app:       tview.NewApplication(),
 		cfg:       cfg,
 		recorder:  rec,
+		listener:  listener.New(cfg.ToolsDir),
 		timetable: tt,
 		streams:   streams,
 		logCh:     logCh,
@@ -85,8 +88,8 @@ func New(
 }
 
 func (u *UI) build() {
-	u.streamTbl = newTable(" Streams ")
-	u.ttTable = newTable(" Timetable ")
+	u.streamTbl = newTable(" Streams ", true)
+	u.ttTable = newTable(" Timetable ", false)
 
 	u.logView = tview.NewTextView().
 		SetDynamicColors(true).
@@ -114,14 +117,26 @@ func (u *UI) build() {
 			u.app.Stop()
 			return nil
 		}
+		if event.Rune() == 'l' || event.Rune() == 'L' {
+			u.listenSelected()
+			return nil
+		}
+		if event.Rune() == 's' || event.Rune() == 'S' {
+			u.stopListening()
+			return nil
+		}
 		return event
 	})
+	u.app.SetFocus(u.streamTbl)
 }
 
-func newTable(title string) *tview.Table {
+func newTable(title string, selectable bool) *tview.Table {
 	t := tview.NewTable().
 		SetBorders(false).
-		SetSelectable(false, false)
+		SetSelectable(selectable, false)
+	if selectable {
+		t.SetFixed(1, 0)
+	}
 	t.SetTitle(title).SetBorder(true)
 	return t
 }
@@ -134,6 +149,10 @@ func (u *UI) Run() error {
 // Stop ends the event loop; safe to call from any goroutine (e.g. signal handler).
 func (u *UI) Stop() {
 	u.app.Stop()
+}
+
+func (u *UI) Close() {
+	u.listener.Stop()
 }
 
 func (u *UI) RunRefresh(ctx context.Context) {
@@ -159,10 +178,12 @@ func (u *UI) refresh() {
 		renderCells(u.streamTbl,
 			[]string{"Stage", "Status", "Artist", "Listeners", "Size", "Ends in"},
 			streamRows,
+			true,
 		)
 		renderCells(u.ttTable,
 			[]string{"Stage", "Time", "Artist", "Starts In"},
 			ttRows,
+			false,
 		)
 		u.statusBar.SetText(status)
 	})
@@ -247,22 +268,87 @@ func (u *UI) buildTimetableRows() [][]cell {
 }
 
 func (u *UI) buildStatusBar() string {
+	audio := u.listener.Snapshot()
+	audioText := string(audio.State)
+	if audio.Stage != "" {
+		audioText = fmt.Sprintf("%s: %s", audio.State, audio.Stage)
+	}
 	return util.Sanitize(fmt.Sprintf(
-		"DEFQON.1 Recorder by revunix | Active: %d/%d | Total Listeners: %s",
+		"DEFQON.1 Recorder by revunix | Active: %d/%d | Total Listeners: %s | Audio: %s",
 		u.recorder.Count(),
 		len(u.cfg.Channels),
 		util.FormatThousands(u.recorder.TotalListeners()),
+		audioText,
 	))
+}
+
+func (u *UI) listenSelected() {
+	stream, ok := u.selectedStream()
+	if !ok {
+		u.appendLog(LogMessage{Level: logging.LevelWarn, Text: "No stream selected."})
+		return
+	}
+	if !stream.Online || stream.StreamURL == "" {
+		u.appendLog(LogMessage{Level: logging.LevelWarn, Text: fmt.Sprintf("[%s] No live stream URL available.", stream.Stage)})
+		return
+	}
+
+	stage := stream.Stage
+	streamURL := stream.StreamURL
+	u.appendLog(LogMessage{Level: logging.LevelInfo, Text: fmt.Sprintf("[%s] Starting TUI audio...", stage)})
+	go func() {
+		if err := u.listener.Play(stage, streamURL); err != nil {
+			u.queueLog(LogMessage{Level: logging.LevelError, Text: fmt.Sprintf("[%s] Audio failed: %s", stage, err)})
+			return
+		}
+		u.queueLog(LogMessage{Level: logging.LevelInfo, Text: fmt.Sprintf("[%s] TUI audio playing.", stage)})
+	}()
+}
+
+func (u *UI) stopListening() {
+	audio := u.listener.Snapshot()
+	if audio.State == listener.StateStopped {
+		u.appendLog(LogMessage{Level: logging.LevelWarn, Text: "Audio is already stopped."})
+		return
+	}
+	u.listener.Stop()
+	u.appendLog(LogMessage{Level: logging.LevelInfo, Text: "TUI audio stopped."})
+}
+
+func (u *UI) selectedStream() (status.Stream, bool) {
+	row, _ := u.streamTbl.GetSelection()
+	streams := u.streams.All()
+	if len(streams) == 0 {
+		return status.Stream{}, false
+	}
+	if row < 1 {
+		row = 1
+	}
+	idx := row - 1
+	if idx >= len(streams) {
+		idx = len(streams) - 1
+	}
+	u.streamTbl.Select(idx+1, 0)
+	return streams[idx], true
 }
 
 func (u *UI) drainLogs() {
 	for msg := range u.logCh {
-		line := formatLog(msg)
 		u.app.QueueUpdateDraw(func() {
-			fmt.Fprintln(u.logView, line)
-			u.logView.ScrollToEnd()
+			u.appendLog(msg)
 		})
 	}
+}
+
+func (u *UI) appendLog(msg LogMessage) {
+	fmt.Fprintln(u.logView, formatLog(msg))
+	u.logView.ScrollToEnd()
+}
+
+func (u *UI) queueLog(msg LogMessage) {
+	u.app.QueueUpdateDraw(func() {
+		u.appendLog(msg)
+	})
 }
 
 func formatLog(msg LogMessage) string {
@@ -282,7 +368,8 @@ type cell struct {
 	color tcell.Color
 }
 
-func renderCells(t *tview.Table, headers []string, rows [][]cell) {
+func renderCells(t *tview.Table, headers []string, rows [][]cell, preserveSelection bool) {
+	selectedRow, selectedCol := t.GetSelection()
 	t.Clear()
 	for c, h := range headers {
 		t.SetCell(0, c, tview.NewTableCell(h).
@@ -293,12 +380,20 @@ func renderCells(t *tview.Table, headers []string, rows [][]cell) {
 	for r, row := range rows {
 		for c, cl := range row {
 			tc := tview.NewTableCell(cl.text).
-				SetMaxWidth(50).
-				SetSelectable(false)
+				SetMaxWidth(50)
 			if cl.color != tcell.ColorDefault {
 				tc.SetTextColor(cl.color)
 			}
 			t.SetCell(r+1, c, tc)
 		}
+	}
+	if preserveSelection && len(rows) > 0 {
+		if selectedRow < 1 {
+			selectedRow = 1
+		}
+		if selectedRow > len(rows) {
+			selectedRow = len(rows)
+		}
+		t.Select(selectedRow, selectedCol)
 	}
 }

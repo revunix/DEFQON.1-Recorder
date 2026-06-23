@@ -9,6 +9,7 @@ type Stream struct {
 	Channel       string
 	Stage         string
 	Online        bool
+	StreamURL     string
 	ListenerCount int
 	UpdatedAt     time.Time
 }
@@ -33,7 +34,7 @@ func New(channels []string) *Registry {
 	return r
 }
 
-func (r *Registry) Set(channel, stage string, online bool, listeners int) {
+func (r *Registry) Set(channel, stage string, online bool, listeners int, streamURL string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -47,6 +48,11 @@ func (r *Registry) Set(channel, stage string, online bool, listeners int) {
 		s.Stage = stage
 	}
 	s.Online = online
+	if online {
+		s.StreamURL = streamURL
+	} else {
+		s.StreamURL = ""
+	}
 	s.ListenerCount = listeners
 	s.UpdatedAt = time.Now()
 }

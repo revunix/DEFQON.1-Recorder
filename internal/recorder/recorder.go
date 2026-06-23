@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -286,6 +287,13 @@ func (m *Manager) forceKill(stage string) {
 // interrupt asks both processes to shut down gracefully so ffmpeg can finalize
 // a valid MP3 (it flushes and writes the trailer on SIGINT).
 func (r *recording) interrupt() {
+	if runtime.GOOS == "windows" {
+		// os.Interrupt is not delivered to child processes on Windows. Kill both
+		// tools immediately so quitting the TUI cannot leave a hidden recorder
+		// waiting for the force-kill timeout.
+		r.kill()
+		return
+	}
 	if r.ytdlp.Process != nil {
 		_ = r.ytdlp.Process.Signal(os.Interrupt)
 	}
