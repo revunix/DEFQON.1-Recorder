@@ -1,6 +1,9 @@
 package util
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestFormatBytes(t *testing.T) {
 	cases := map[int64]string{
@@ -45,6 +48,18 @@ func TestFormatThousands(t *testing.T) {
 		if got := FormatThousands(in); got != want {
 			t.Errorf("FormatThousands(%d) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestBerlinUsesSummerTimeInJune(t *testing.T) {
+	loc := Berlin()
+	start := time.Date(2026, time.June, 25, 20, 0, 0, 0, loc)
+	_, offset := start.Zone()
+	if offset != 2*60*60 {
+		t.Fatalf("2026-06-25 20:00 zone offset = %d seconds, want %d", offset, 2*60*60)
+	}
+	if got := start.UTC().Format("15:04"); got != "18:00" {
+		t.Fatalf("2026-06-25 20:00 event time resolves to UTC %s, want 18:00", got)
 	}
 }
 

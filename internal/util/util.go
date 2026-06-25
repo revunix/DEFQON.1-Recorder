@@ -8,6 +8,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	// Embed IANA tzdata for Windows and minimal container builds, which may not
+	// have a system zoneinfo database to satisfy time.LoadLocation.
+	_ "time/tzdata"
 )
 
 var (
