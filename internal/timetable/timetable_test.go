@@ -1,6 +1,7 @@
 package timetable
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -41,6 +42,47 @@ func TestLoadTimetable(t *testing.T) {
 	}
 	if opening.End.Equal(opening.Start) {
 		t.Fatal("end time not derived from next set")
+	}
+}
+
+func TestMarkerIsNotASetButBoundsPreviousEnd(t *testing.T) {
+	// A time-only marker (no DJ) must not become a "TBA" set; it only marks the
+	// end of the previous set so it does not run on into the next day.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tt.json")
+	payload := `[
+		{"stage":"RED","sets":[
+			[2026,6,26,22,20,"The Spotlight"],
+			[2026,6,26,23,0],
+			[2026,6,27,12,30,"Serzo"]
+		]}
+	]`
+	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tt, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	// Only the two real sets; the marker must not leak in as a "TBA" set.
+	if tt.Size() != 2 {
+		var djs []string
+		for _, s := range tt.sets {
+			djs = append(djs, s.DJ)
+		}
+		t.Fatalf("expected 2 sets (no TBA marker), got %d: %v", tt.Size(), djs)
+	}
+	for _, s := range tt.sets {
+		if s.DJ == "TBA" || s.DJ == "" {
+			t.Fatalf("marker leaked as a set: %+v", s)
+		}
+	}
+	// The first set must end at the marker time (23:00), not +60min or next day.
+	first := tt.SetsForStage("RED")[0]
+	loc := first.Start.Location()
+	wantEnd := time.Date(2026, time.June, 26, 23, 0, 0, 0, loc)
+	if !first.End.Equal(wantEnd) {
+		t.Fatalf("first set ends at %v, want %v (marker time)", first.End, wantEnd)
 	}
 }
 

@@ -85,6 +85,10 @@ func Load(path string) (*Timetable, error) {
 	var all []Set
 
 	for _, stage := range raw {
+		// Parse every entry, including time-only markers (no DJ name). A marker
+		// such as [2026, 6, 26, 23, 0] is kept only to bound the end of the
+		// previous set; it is not itself a playable set, so it must not become a
+		// "TBA" entry that spans the overnight gap until the next day.
 		stageSets := make([]Set, 0, len(stage.Sets))
 		for _, rawSet := range stage.Sets {
 			if len(rawSet) < 5 {
@@ -98,15 +102,18 @@ func Load(path string) (*Timetable, error) {
 				util.ToInt(rawSet[4]),
 				0, 0, loc,
 			)
-			parts := make([]string, 0, len(rawSet)-5)
-			for _, p := range rawSet[5:] {
-				if s, ok := p.(string); ok {
-					parts = append(parts, s)
+			dj := ""
+			if len(rawSet) > 5 {
+				parts := make([]string, 0, len(rawSet)-5)
+				for _, p := range rawSet[5:] {
+					if s, ok := p.(string); ok {
+						parts = append(parts, s)
+					}
 				}
-			}
-			dj := strings.TrimSpace(strings.Join(parts, " "))
-			if dj == "" {
-				dj = "TBA"
+				dj = strings.TrimSpace(strings.Join(parts, " "))
+				if dj == "" {
+					dj = "TBA"
+				}
 			}
 			stageSets = append(stageSets, Set{Stage: stage.Stage, DJ: dj, Start: start})
 		}
@@ -121,6 +128,9 @@ func Load(path string) (*Timetable, error) {
 				end = stageSets[i+1].Start
 			}
 			stageSets[i].End = end
+			if stageSets[i].DJ == "" {
+				continue // marker: end boundary only, not a playable set
+			}
 			all = append(all, stageSets[i])
 		}
 	}
